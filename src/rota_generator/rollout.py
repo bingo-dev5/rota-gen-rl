@@ -22,9 +22,7 @@ class RotaScenario(BaseModel):
 
 
 @art.retry(exceptions=(openai.LengthFinishReasonError,))
-async def rollout(
-    model: art.Model, scenario: RotaScenario
-) -> art.Trajectory:
+async def rollout(model: art.Model, scenario: RotaScenario) -> art.Trajectory:
     client = model.openai_client()
 
     trajectory = art.Trajectory(

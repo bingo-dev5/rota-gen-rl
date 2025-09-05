@@ -2,20 +2,155 @@ import art
 import asyncio
 from dotenv import load_dotenv
 import random
+import json
+import os
+from pathlib import Path
+from typing import List
 from art.skypilot import SkyPilotBackend
+from art.rewards import ruler_score_group
+from art.utils import iterate_dataset
+from art.utils.litellm import convert_litellm_choice_to_openai
+
+from litellm import acompletion
+from pydantic import BaseModel, Field
 
 from rota_generator import rollout, RotaScenario
-from summarizer.load_documents import load_documents
+from rota_generator.load_documents import load_documents
+
 
 load_dotenv()
 
 AGENT_NAME = "agent-007"
 PROJECT_NAME = "rota-generator"
 CLUSTER_NAME = "rotagen-art"
+RULER_MODEL = (
+    "openrouter/deepseek/deepseek-r1-0528"  # Model for RULER evaluation
+)
+SYSTEM_PROMPT_GENERATION_MODEL = "openrouter/moonshotai/kimi-k2"
+INPUT_GENERATION_MODEL = "openrouter/moonshotai/kimi-k2"
+
+TASK_DESCRIPTION = """
+You are a specialized AI assistant that generates fully functioning rotas for employees based on their staff grade, schedules and preferences.
+Each employee has the following attributes:
+- Staff grade
+- Preferred working hours
+- Availability
+- Skill set
+Your task is to create a rota that optimally assigns shifts to employees while adhering to the following constraints:
+- Ensure that all shifts are covered adequately based on the required staffing levels.
+- Respect employee preferences and availability as much as possible.
+- Balance the workload fairly among all employees.
+- Comply with labor regulations regarding maximum working hours and mandatory breaks.
+"""
+
+
+class TrainingInput(BaseModel):
+    input: str = Field(description="The input text for the task")
+
+
+class TrainingDataset(BaseModel):
+    inputs: List[TrainingInput] = Field(description="List of training inputs")
+
+
+async def generate_training_inputs(
+    task_description: str, num_examples: int = 50
+) -> List[str]:
+    """Generate diverse training inputs for the given task"""
+
+    system_prompt = f"""You are a helpful assistant that generates diverse, high-quality training inputs.
+
+Task: {task_description}
+
+Generate {num_examples} diverse INPUT examples that someone might provide for this task.
+Make sure the inputs:
+1. Cover a wide range of cases and edge cases
+2. Are realistic and practical
+3. Vary in length and complexity
+4. Represent real-world scenarios
+
+Only generate the INPUTS, not the outputs. RULER will evaluate the model's attempts automatically.
+"""
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": f"Generate {num_examples} input examples for the task described above. Return them in the form of a list.",
+        },
+    ]
+
+    print(f"Generating {num_examples} training inputs...")
+
+    inputs = []
+
+    i = 0
+    while i < 5 and len(inputs) < num_examples:
+        i += 1
+        response = await acompletion(
+            model=INPUT_GENERATION_MODEL,
+            messages=messages,
+            response_format=TrainingDataset,
+            temperature=1.0,
+        )
+
+        dataset = TrainingDataset.model_validate_json(
+            response.choices[0].message.content
+        )
+        inputs = [ex.input for ex in dataset.inputs]
+
+    if len(inputs) < num_examples:
+        raise ValueError(f"Failed to generate {num_examples} training inputs.")
+
+    return inputs
 
 
 async def main():
+    # Load documents for training / validation
     val_documents, train_documents = load_documents()
+    # Load or generate training inputs (cached to avoid regeneration every run)
+    ROOT_DIR = Path(__file__).resolve().parents[2]
+    DATA_DIR = ROOT_DIR / "data"
+    DATA_DIR.mkdir(exist_ok=True)
+    TRAINING_INPUTS_PATH = DATA_DIR / "training_inputs.json"
+
+    force_regen = bool(os.getenv("FORCE_REGENERATE_TRAINING_INPUTS"))
+
+    if TRAINING_INPUTS_PATH.exists() and not force_regen:
+        try:
+            training_inputs = json.loads(TRAINING_INPUTS_PATH.read_text())
+            print(
+                f"Loaded {len(training_inputs)} cached training inputs from {TRAINING_INPUTS_PATH} (set FORCE_REGENERATE_TRAINING_INPUTS=1 to regenerate)."
+            )
+        except Exception as e:
+            print(
+                f"Failed to load cached training inputs ({e}); regenerating..."
+            )
+            training_inputs = await generate_training_inputs(
+                TASK_DESCRIPTION, num_examples=300
+            )
+            TRAINING_INPUTS_PATH.write_text(
+                json.dumps(training_inputs, indent=2, ensure_ascii=False)
+            )
+            print(
+                f"Saved {len(training_inputs)} training inputs to {TRAINING_INPUTS_PATH}"
+            )
+    else:
+        if force_regen and TRAINING_INPUTS_PATH.exists():
+            print(
+                "FORCE_REGENERATE_TRAINING_INPUTS set; regenerating training inputs..."
+            )
+        elif not TRAINING_INPUTS_PATH.exists():
+            print("No cached training inputs found; generating...")
+
+        training_inputs = await generate_training_inputs(
+            TASK_DESCRIPTION, num_examples=300
+        )
+        TRAINING_INPUTS_PATH.write_text(
+            json.dumps(training_inputs, indent=2, ensure_ascii=False)
+        )
+        print(
+            f"Saved {len(training_inputs)} training inputs to {TRAINING_INPUTS_PATH}"
+        )
 
     backend = await SkyPilotBackend.initialize_cluster(
         cluster_name=CLUSTER_NAME,
@@ -66,9 +201,7 @@ async def main():
                         art.TrajectoryGroup(
                             rollout(
                                 model,
-                                RotaScenario(
-                                    doc=document, step=current_step
-                                ),
+                                RotaScenario(doc=document, step=current_step),
                             )
                             for _ in range(2)
                         )
@@ -79,7 +212,7 @@ async def main():
                 art.gather_trajectory_groups(
                     (
                         art.TrajectoryGroup(
-                            rollout(model, SummarizerScenario(doc=document))
+                            rollout(model, RotaScenario(doc=document))
                             for _ in range(10)
                         )
                         for document in train_documents[

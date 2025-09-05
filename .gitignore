@@ -1,0 +1,66 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.so
+
+# Packaging / build
+.build/
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.coverage*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+.envrc
+
+# Environment & secrets
+.env
+.env.*
+*.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS files
+.DS_Store
+
+# Logs & temp
+logs/
+*.log
+*.tmp
+/tmp/
+
+# Tools
+wandb/
+.mypy_cache/
+.pyre/
+ruff_cache/
+
+# Cache
+.cache/
+
+# Node (if any future frontend)
+node_modules/
+
+# Hatch / build system extras
+pip-wheel-metadata/
+
+# Benchmark / experimental outputs
+benchmarks/output/
+
+# Local cached data (training inputs, etc.)
+data/
+
+# AWS credentials (never commit if present)
+.aws/

@@ -4,17 +4,18 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-summarizer-rl = {file = ".", editable = true}
+rota-generator-rl = {file = ".", editable = true}
 runpod = ">=1.6"
+openpipe-art = {extras = ["skypilot"], version = "*"}
 skypilot-nightly = {extras = ["runpod"], version = "*"}
 semver = "*"
 async-lru = "*"
 datasets = "*"
 huggingface-hub = "*"
 requests = "*"
-black = "*"
 
 [dev-packages]
+black = "*"
 
 [requires]
-python_version = "3.10"
+python_version = "3.13"

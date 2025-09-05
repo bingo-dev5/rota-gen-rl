@@ -1,9 +1,9 @@
 [project]
-name = "summarizer-rl"
+name = "rota-generator-rl"
 version = "0.1.0"
-description = "Document Summarizer Agent"
+description = "Rota Generator Agent"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12, <4.0"
 dependencies = [
     "openpipe>=4.50.0",
     "openpipe-art>=0.3.6",
@@ -14,7 +14,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
-sources = ["src/summarizer"]
+sources = ["src/rota_generator"]
 dev-mode-dirs = ["src"]
 
 
@@ -22,7 +22,7 @@ dev-mode-dirs = ["src"]
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/summarizer"]
+packages = ["src/rota_generator"]
 
 [tool.black]
 line-length = 80
