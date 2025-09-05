@@ -1,0 +1,42 @@
+[project]
+name = "summarizer-rl"
+version = "0.1.0"
+description = "Document Summarizer Agent"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openpipe>=4.50.0",
+    "openpipe-art>=0.3.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+sources = ["src/summarizer"]
+dev-mode-dirs = ["src"]
+
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/summarizer"]
+
+[tool.black]
+line-length = 80
+
+[dependency-groups]
+dev = [
+    "semver>=3.0.4",
+    "python-dotenv>=1.1.0",
+    "openai>=1.74.0",
+    "skypilot[aws,cudo,do,fluidstack,gcp,lambda,paperspace,runpod]>=0.8.0",
+    "black>=25.1.0",
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.5",
+    "hatch>=1.14.1",
+    "async-lru>=2.0.5",
+    "accelerate>=1.7.0",
+]
