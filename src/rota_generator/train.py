@@ -7,15 +7,18 @@ import os
 from pathlib import Path
 from typing import List
 from art.skypilot import SkyPilotBackend
-from art.rewards import ruler_score_group
-from art.utils import iterate_dataset
-from art.utils.litellm import convert_litellm_choice_to_openai
 
 from litellm import acompletion
 from pydantic import BaseModel, Field
 
 from rota_generator import rollout, RotaScenario
-from rota_generator.load_documents import load_documents
+from rota_generator.load_documents import Document
+from rota_generator.data_utils import (
+    generate_training_inputs,
+    top_up_training_inputs,
+    load_cached_training_inputs,
+    save_training_inputs,
+)
 
 
 load_dotenv()
@@ -23,11 +26,11 @@ load_dotenv()
 AGENT_NAME = "agent-007"
 PROJECT_NAME = "rota-generator"
 CLUSTER_NAME = "rotagen-art"
-RULER_MODEL = (
-    "openrouter/deepseek/deepseek-r1-0528"  # Model for RULER evaluation
-)
+# (Optional) A separate model could be used for judging; rollout handles judging internally now.
+RULER_MODEL = "openrouter/deepseek/deepseek-r1-0528"
 SYSTEM_PROMPT_GENERATION_MODEL = "openrouter/moonshotai/kimi-k2"
 INPUT_GENERATION_MODEL = "openrouter/moonshotai/kimi-k2"
+TARGET_TRAINING_INPUTS = 300  # Desired total number of training examples
 
 TASK_DESCRIPTION = """
 You are a specialized AI assistant that generates fully functioning rotas for employees based on their staff grade, schedules and preferences.
@@ -48,65 +51,38 @@ class TrainingInput(BaseModel):
     input: str = Field(description="The input text for the task")
 
 
-class TrainingDataset(BaseModel):
+class TrainingDataset(BaseModel):  # kept for backward compatibility
     inputs: List[TrainingInput] = Field(description="List of training inputs")
 
 
-async def generate_training_inputs(
-    task_description: str, num_examples: int = 50
-) -> List[str]:
-    """Generate diverse training inputs for the given task"""
-
-    system_prompt = f"""You are a helpful assistant that generates diverse, high-quality training inputs.
-
-Task: {task_description}
-
-Generate {num_examples} diverse INPUT examples that someone might provide for this task.
-Make sure the inputs:
-1. Cover a wide range of cases and edge cases
-2. Are realistic and practical
-3. Vary in length and complexity
-4. Represent real-world scenarios
-
-Only generate the INPUTS, not the outputs. RULER will evaluate the model's attempts automatically.
-"""
+# Generate a system prompt for the task
+async def generate_system_prompt(
+    task_description: str,
+) -> str:
+    """Generate an appropriate system prompt for the task"""
 
     messages = [
-        {"role": "system", "content": system_prompt},
+        {
+            "role": "system",
+            "content": "Generate a clear, concise system prompt for a model that will perform the following task. The prompt should be direct and instructional.",
+        },
         {
             "role": "user",
-            "content": f"Generate {num_examples} input examples for the task described above. Return them in the form of a list.",
+            "content": f"Task: {task_description}\n\nGenerate a system prompt for this task.",
         },
     ]
 
-    print(f"Generating {num_examples} training inputs...")
+    response = await acompletion(
+        model=SYSTEM_PROMPT_GENERATION_MODEL,
+        messages=messages,
+        temperature=0.3,
+    )
 
-    inputs = []
-
-    i = 0
-    while i < 5 and len(inputs) < num_examples:
-        i += 1
-        response = await acompletion(
-            model=INPUT_GENERATION_MODEL,
-            messages=messages,
-            response_format=TrainingDataset,
-            temperature=1.0,
-        )
-
-        dataset = TrainingDataset.model_validate_json(
-            response.choices[0].message.content
-        )
-        inputs = [ex.input for ex in dataset.inputs]
-
-    if len(inputs) < num_examples:
-        raise ValueError(f"Failed to generate {num_examples} training inputs.")
-
-    return inputs
+    return response.choices[0].message.content.strip()
 
 
 async def main():
-    # Load documents for training / validation
-    val_documents, train_documents = load_documents()
+    # We synthesize training documents instead of loading gold data.
     # Load or generate training inputs (cached to avoid regeneration every run)
     ROOT_DIR = Path(__file__).resolve().parents[2]
     DATA_DIR = ROOT_DIR / "data"
@@ -116,41 +92,48 @@ async def main():
     force_regen = bool(os.getenv("FORCE_REGENERATE_TRAINING_INPUTS"))
 
     if TRAINING_INPUTS_PATH.exists() and not force_regen:
-        try:
-            training_inputs = json.loads(TRAINING_INPUTS_PATH.read_text())
-            print(
-                f"Loaded {len(training_inputs)} cached training inputs from {TRAINING_INPUTS_PATH} (set FORCE_REGENERATE_TRAINING_INPUTS=1 to regenerate)."
-            )
-        except Exception as e:
-            print(
-                f"Failed to load cached training inputs ({e}); regenerating..."
-            )
-            training_inputs = await generate_training_inputs(
-                TASK_DESCRIPTION, num_examples=300
-            )
-            TRAINING_INPUTS_PATH.write_text(
-                json.dumps(training_inputs, indent=2, ensure_ascii=False)
-            )
-            print(
-                f"Saved {len(training_inputs)} training inputs to {TRAINING_INPUTS_PATH}"
-            )
+        training_inputs = load_cached_training_inputs(TRAINING_INPUTS_PATH)
+        print(
+            f"Loaded {len(training_inputs)} cached training inputs from {TRAINING_INPUTS_PATH} (set FORCE_REGENERATE_TRAINING_INPUTS=1 to regenerate)."
+        )
     else:
+        training_inputs = []
+
+    if force_regen or not training_inputs:
         if force_regen and TRAINING_INPUTS_PATH.exists():
             print(
                 "FORCE_REGENERATE_TRAINING_INPUTS set; regenerating training inputs..."
             )
         elif not TRAINING_INPUTS_PATH.exists():
             print("No cached training inputs found; generating...")
-
         training_inputs = await generate_training_inputs(
-            TASK_DESCRIPTION, num_examples=300
+            TASK_DESCRIPTION,
+            target_count=TARGET_TRAINING_INPUTS,
+            save_path=TRAINING_INPUTS_PATH,
         )
-        TRAINING_INPUTS_PATH.write_text(
-            json.dumps(training_inputs, indent=2, ensure_ascii=False)
-        )
+        save_training_inputs(TRAINING_INPUTS_PATH, training_inputs)
         print(
             f"Saved {len(training_inputs)} training inputs to {TRAINING_INPUTS_PATH}"
         )
+
+    training_inputs = await top_up_training_inputs(
+        training_inputs,
+        TARGET_TRAINING_INPUTS,
+        TASK_DESCRIPTION,
+        TRAINING_INPUTS_PATH,
+    )
+
+    # Wrap into Document objects (empty questions list for compatibility)
+    documents = [
+        Document(document_text=t, questions=[]) for t in training_inputs
+    ]
+    random.shuffle(documents)
+    val_split = max(10, len(documents) // 6)
+    val_documents = documents[:val_split]
+    train_documents = documents[val_split:]
+
+    SYSTEM_PROMPT = await generate_system_prompt(TASK_DESCRIPTION)
+    print(f"Generated system prompt:\n\n{SYSTEM_PROMPT}")
 
     backend = await SkyPilotBackend.initialize_cluster(
         cluster_name=CLUSTER_NAME,
@@ -166,32 +149,25 @@ async def main():
     await backend._experimental_pull_from_s3(model)
     await model.register(backend)
 
-    batch_size = 10  # Process this many documents per batch
-    num_epochs = 1  # Number of complete passes through the training data
-
+    batch_size = 10  # documents per batch
+    num_epochs = 1
     start_step = await model.get_step()
     max_steps = 1000
 
     for epoch in range(num_epochs):
         print(f"Starting epoch {epoch + 1}/{num_epochs}")
-        # Shuffle training data at the beginning of each epoch
         random.shuffle(train_documents)
-
-        # Calculate how many batches we can process in this epoch
         num_batches = min(
             len(train_documents) // batch_size,
             (max_steps - start_step) // num_epochs,
         )
-
         for batch in range(num_batches):
             current_step = start_step + epoch * num_batches + batch
             if current_step >= max_steps:
                 break
-
             print(
                 f"Epoch {epoch + 1}, Batch {batch + 1}/{num_batches}, Step {current_step}"
             )
-
             batch_start_idx = batch * batch_size
             batch_end_idx = (batch + 1) * batch_size
 
@@ -202,6 +178,7 @@ async def main():
                             rollout(
                                 model,
                                 RotaScenario(doc=document, step=current_step),
+                                SYSTEM_PROMPT,
                             )
                             for _ in range(2)
                         )
@@ -212,8 +189,12 @@ async def main():
                 art.gather_trajectory_groups(
                     (
                         art.TrajectoryGroup(
-                            rollout(model, RotaScenario(doc=document))
-                            for _ in range(10)
+                            rollout(
+                                model,
+                                RotaScenario(doc=document),
+                                SYSTEM_PROMPT,
+                            )
+                            for _ in range(2)
                         )
                         for document in train_documents[
                             batch_start_idx:batch_end_idx

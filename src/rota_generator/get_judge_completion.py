@@ -17,14 +17,24 @@ client = AsyncOpenAI(
 
 @alru_cache(maxsize=1024)
 async def get_judge_completion(
-    prompt, temperature=0.0, max_tokens=600, retries=3, timeout=10
+    prompt,
+    model,
+    temperature=0.0,
+    max_tokens=600,
+    retries=3,
+    timeout=10,
 ) -> str:
     for attempt in range(1, retries + 1):
         try:
             async with semaphore:
                 completion = await client.chat.completions.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    model="google/gemini-2.5-flash-preview",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        }
+                    ],
+                    model=model,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
