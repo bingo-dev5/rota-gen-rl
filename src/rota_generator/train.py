@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import List
 from art.skypilot import SkyPilotBackend
+import weave
 
 from litellm import acompletion
 from pydantic import BaseModel, Field
@@ -29,8 +30,7 @@ CLUSTER_NAME = "rotagen-art"
 # (Optional) A separate model could be used for judging; rollout handles judging internally now.
 RULER_MODEL = "openrouter/deepseek/deepseek-r1-0528"
 SYSTEM_PROMPT_GENERATION_MODEL = "openrouter/moonshotai/kimi-k2"
-INPUT_GENERATION_MODEL = "openrouter/moonshotai/kimi-k2"
-TARGET_TRAINING_INPUTS = 300  # Desired total number of training examples
+TARGET_TRAINING_INPUTS = 150  # Desired total number of training examples
 
 TASK_DESCRIPTION = """
 You are a specialized AI assistant that generates fully functioning rotas for employees based on their staff grade, schedules and preferences.
@@ -132,8 +132,35 @@ async def main():
     val_documents = documents[:val_split]
     train_documents = documents[val_split:]
 
-    SYSTEM_PROMPT = await generate_system_prompt(TASK_DESCRIPTION)
-    print(f"Generated system prompt:\n\n{SYSTEM_PROMPT}")
+    # SYSTEM_PROMPT = await generate_system_prompt(TASK_DESCRIPTION)
+    # print(f"Generated system prompt:\n\n{SYSTEM_PROMPT}")
+    SYSTEM_PROMPT = """
+    You are ShiftBot, a rota-generation assistant.  
+    Input you will receive:  
+    1. A list of shifts (date, start-time, end-time, minimum staff grade required, number of staff needed, required skill tags).  
+    2. A list of employees (ID, staff grade, weekly preferred hours, weekly max hours, daily availability windows, skill tags, any hard constraints).  
+
+    Your job:  
+    Produce a valid weekly rota in JSON that assigns each shift to specific employees while satisfying ALL of the following rules:  
+    - Every shift is filled with the exact number of employees whose grade ≥ required grade and who possess every required skill tag.  
+    - No employee is scheduled outside their stated availability windows.  
+    - No employee exceeds their weekly preferred hours by more than 2 h or their weekly max hours at all.  
+    - Between any two shifts assigned to the same employee there must be at least 11 h rest.  
+    - No single shift may exceed the legal maximum without a break; if longer, insert an unpaid break of ≥30 min.  
+    - Workload (total assigned hours) must differ by no more than 15 % between any two employees of the same grade.  
+    - If multiple valid solutions exist, prefer the one that minimizes total deviation from each employee’s preferred hours.  
+
+    Output format:  
+    {  
+    "rota": [  
+        { "shift_id": "S001", "date": "2024-06-03", "start": "08:00", "end": "16:00", "employees": ["E123","E124"] },  
+        …  
+    ],  
+    "summary": {  
+        "E123": { "assigned_hours": 38, "deviation": +2 },  
+        …  
+    }  
+    }"""
 
     backend = await SkyPilotBackend.initialize_cluster(
         cluster_name=CLUSTER_NAME,
@@ -146,8 +173,11 @@ async def main():
         project=PROJECT_NAME,
         base_model="Qwen/Qwen2.5-3B-Instruct",
     )
-    await backend._experimental_pull_from_s3(model)
+    # await backend._experimental_pull_from_s3(model)
     await model.register(backend)
+
+    if os.getenv("WANDB_API_KEY", ""):
+        weave.init(PROJECT_NAME, settings={"print_call_link": False})
 
     batch_size = 10  # documents per batch
     num_epochs = 1

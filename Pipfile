@@ -13,6 +13,7 @@ async-lru = "*"
 datasets = "*"
 huggingface-hub = "*"
 requests = "*"
+wandb = "*"
 
 [dev-packages]
 black = "*"
