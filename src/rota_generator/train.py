@@ -167,8 +167,10 @@ async def main():
     backend = await SkyPilotBackend.initialize_cluster(
         cluster_name=CLUSTER_NAME,
         env_path=".env",
-        gpu="L4",
+        gpu="H100",
+    
     )
+    SkyPilotBackend.initialize_cluster()
 
     model = art.TrainableModel(
         name=AGENT_NAME,
@@ -229,7 +231,7 @@ async def main():
                                 RotaScenario(doc=document),
                                 SYSTEM_PROMPT,
                             )
-                            for _ in range(2)
+                            for _ in range(10)
                         )
                         for document in train_documents[
                             batch_start_idx:batch_end_idx
@@ -245,7 +247,7 @@ async def main():
                 train_groups,
                 config=art.TrainConfig(learning_rate=5e-5),
             )
-            await backend._experimental_push_to_s3(model)
+    await backend._experimental_push_to_s3(model)
 
 
 if __name__ == "__main__":
