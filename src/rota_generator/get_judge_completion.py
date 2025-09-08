@@ -20,7 +20,7 @@ async def get_judge_completion(
     prompt,
     model,
     temperature=0.0,
-    max_tokens=600,
+    max_tokens=1024,
     retries=3,
     timeout=10,
 ) -> str:

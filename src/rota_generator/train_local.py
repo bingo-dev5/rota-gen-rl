@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 from typing import List
-from art.skypilot import SkyPilotBackend
+from art.local import LocalBackend
 import weave
 
 from litellm import acompletion
@@ -164,19 +164,13 @@ async def main():
     }  
     }"""
 
-    backend = await SkyPilotBackend.initialize_cluster(
-        cluster_name=CLUSTER_NAME,
-        env_path=".env",
-        gpu="L4",
-    )
+    backend = LocalBackend()
 
     model = art.TrainableModel(
         name=AGENT_NAME,
         project=PROJECT_NAME,
         base_model="Qwen/Qwen2.5-3B-Instruct",
     )
-    await backend.wait_until_ready()
-    # await backend._experimental_pull_from_s3(model)
     await model.register(backend)
 
     if os.getenv("WANDB_API_KEY", ""):
