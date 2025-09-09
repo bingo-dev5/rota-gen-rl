@@ -1,4 +1,4 @@
-## Rota Generator RL
+## SLM-GRPO Rota Generator RL
 
 Train a rota-generation agent with reinforcement learning using the [ART](https://github.com/openpipe/art) framework and Qwen2.5-3B-Instruct, backed by a SkyPilot-managed GPU cluster. The agent learns to produce valid, constraint-satisfying staff rotas from natural-language scenarios.
 
