@@ -131,7 +131,9 @@ def load_cached_training_inputs(path: Path) -> List[str]:
     try:
         return json.loads(path.read_text())
     except Exception as e:
-        print(f"Failed to load cached training inputs ({e}); returning empty list.")
+        print(
+            f"Failed to load cached training inputs ({e}); returning empty list."
+        )
         return []
 
 

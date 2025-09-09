@@ -168,7 +168,6 @@ async def main():
         cluster_name=CLUSTER_NAME,
         env_path=".env",
         gpu="H100",
-    
     )
     SkyPilotBackend.initialize_cluster()
 

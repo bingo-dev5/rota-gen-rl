@@ -50,16 +50,17 @@ async def rollout(
         },
     )
 
-    rota_prompt = f"""You are a specialized AI assistant that generates rotas for employees based on their staff grade, schedules and preferences.
+    rota_prompt = f"""
+    You are a specialized AI assistant that generates rotas for employees based on their staff grade, schedules and preferences.
 
-Here is a set of employee attributes: {scenario.doc.document_text}
+    Here is a set of employee attributes: {scenario.doc.document_text}
 
-Generate a rota that optimally assigns shifts to employees while adhering to the following constraints:
-- Ensure that all shifts are covered adequately based on the required staffing levels.
-- Respect employee preferences and availability as much as possible.
-- Balance the workload fairly among all employees.
-- Comply with labor regulations regarding maximum working hours and mandatory breaks.
-Provide the rota in a clear and organized format."""
+    Generate a rota that optimally assigns shifts to employees while adhering to the following constraints:
+    - Ensure that all shifts are covered adequately based on the required staffing levels.
+    - Respect employee preferences and availability as much as possible.
+    - Balance the workload fairly among all employees.
+    - Comply with labor regulations regarding maximum working hours and mandatory breaks.
+    Provide the rota in a clear and organized format."""
 
     trajectory.messages_and_choices.append(
         {"role": "user", "content": rota_prompt}
@@ -91,27 +92,27 @@ Provide the rota in a clear and organized format."""
     }
 
     judge_prompt = f"""
-You are an expert rota auditor.
+    You are an expert rota auditor.
 
-Evaluate the following generated rota against the staff attributes & constraints.
+    Evaluate the following generated rota against the staff attributes & constraints.
 
-=== STAFF ATTRIBUTES & REQUIREMENTS ===\n{scenario.doc.document_text}\n
-=== GENERATED ROTA ===\n{summary}\n
-For each criterion assign a score between 0.0 and 1.0 (float) where:
-0.0 = completely fails, 0.5 = partially adequate, 1.0 = fully satisfies.
+    === STAFF ATTRIBUTES & REQUIREMENTS ===\n{scenario.doc.document_text}\n
+    === GENERATED ROTA ===\n{summary}\n
+    For each criterion assign a score between 0.0 and 1.0 (float) where:
+    0.0 = completely fails, 0.5 = partially adequate, 1.0 = fully satisfies.
 
-Criteria definitions:
-Coverage: {judge_instructions['coverage']}
-Preferences: {judge_instructions['preferences']}
-Fairness: {judge_instructions['fairness']}
-Compliance: {judge_instructions['compliance']}
+    Criteria definitions:
+    Coverage: {judge_instructions['coverage']}
+    Preferences: {judge_instructions['preferences']}
+    Fairness: {judge_instructions['fairness']}
+    Compliance: {judge_instructions['compliance']}
 
-Also produce an overall score (weighted average: Coverage 0.35, Preferences 0.2, Fairness 0.2, Compliance 0.25).
+    Also produce an overall score (weighted average: Coverage 0.35, Preferences 0.2, Fairness 0.2, Compliance 0.25).
 
-Return ONLY a minified JSON object with keys: coverage, preferences, fairness, compliance, overall, reasoning.
-reasoning = short textual justification (<= 60 words). No backticks, no extra commentary.
-If data is insufficient to judge a criterion, estimate conservatively.
-""".strip()
+    Return ONLY a minified JSON object with keys: coverage, preferences, fairness, compliance, overall, reasoning.
+    reasoning = short textual justification (<= 60 words). No backticks, no extra commentary.
+    If data is insufficient to judge a criterion, estimate conservatively.
+    """.strip()
 
     raw_judge = await get_judge_completion(
         judge_prompt,
